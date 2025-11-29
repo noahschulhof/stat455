@@ -158,28 +158,19 @@ evaluate(actual, forecasted_acp, dates)
 ### ACP using tscount library
 
 ```{r}
+library(tscount)
+
 pred_acp <- rep(NA, n)
 h <- 1
 
-# scaling improved results
-scale_factor <- 100
-z_scaled <- z / scale_factor
-
 for (i in start_test:(n - h)) {
+
+  train <- window(z, end = time(z)[i])
   
-  train <- window(z_scaled, end = time(z_scaled)[i])
+  fit <- suppressWarnings(tsglm(train, model = list(past_obs = 1, past_mean = 1),link = "identity", distr = "poisson"))
   
-  # fit linear ACP using tsglm with identity link
-  fit <- suppressWarnings(
-    tsglm(train,
-          model = list(past_obs = 1, past_mean = 1),
-          link = "identity",
-          distr = "poisson"))
-  
-  # 1-step ahead forecast and rescale
   lambda_next <- predict(fit, n.ahead = h)$pred[h]
-  pred_acp[i + h] <- lambda_next * scale_factor
-}
+  pred_acp[i + h] <- lambda_next}
 
 idx <- start_test + h
 actual <- z[idx:n]
@@ -188,7 +179,11 @@ dates <- index(z)[idx:n]
 
 evaluate(actual, forecasted_acp, dates)
 
-
 ```
+
+
+
+
+
 
 
