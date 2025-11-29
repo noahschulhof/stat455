@@ -17,6 +17,10 @@ Source: https://www.eia.gov/dnav/ng/ng_enr_drill_s1_m.htm
 library(ggplot2)
 library(forecast)
 library(zoo)
+library(acp)
+library(tscount)
+
+
 
 data <- read.csv('data/rigs.csv')
 
@@ -105,7 +109,86 @@ evaluate(actual, forecasted, dates)
 
 ## Fit ACP models
 
+### ACP using acp library
+
 ```{r}
+library(acp)
+pred_acp <- rep(NA, n)
+
+# rolling window forcast
+for (i in start_test:(n - h)) {
+  
+  # train on everything before forecast origin
+  train <- window(z, end = time(z)[i])
+  fit_acp <- suppressWarnings(acp(train ~ -1, p = 1, q = 1))
+
+
+  # extract last values
+  y_last <- tail(train, 1)
+  # print(y_last)
+
+  #last_lambda <- tail(fit_acp$fitted.values, 1)
+  lambda_last <- fit_acp$fitted.values[length(fit_acp$fitted.values)]
+  # print(lambda_last)
+
+  # λ̂_{t+1} = α y_t + β λ_t + ω
+  # extract parameter estimates and use to predict next count
+  par <- coef(fit_acp)
+  omega <- par[1]
+  alpha <- par[2]
+  beta  <- par[3]
+  # print(par)
+
+  
+  lambda_next <- omega + alpha * y_last + beta * lambda_last
+  # print(lambda_next)
+  pred_acp[i + h] <- lambda_next
+
+}
+
+# actual/predicted for test window
+idx <- start_test + h
+actual <- z[idx:n]
+forecasted_acp <- pred_acp[idx:n]
+dates <- index(z)[idx:n]
+
+evaluate(actual, forecasted_acp, dates)
 
 ```
+### ACP using tscount library
+
+```{r}
+pred_acp <- rep(NA, n)
+h <- 1
+
+# scaling improved results
+scale_factor <- 100
+z_scaled <- z / scale_factor
+
+for (i in start_test:(n - h)) {
+  
+  train <- window(z_scaled, end = time(z_scaled)[i])
+  
+  # fit linear ACP using tsglm with identity link
+  fit <- suppressWarnings(
+    tsglm(train,
+          model = list(past_obs = 1, past_mean = 1),
+          link = "identity",
+          distr = "poisson"))
+  
+  # 1-step ahead forecast and rescale
+  lambda_next <- predict(fit, n.ahead = h)$pred[h]
+  pred_acp[i + h] <- lambda_next * scale_factor
+}
+
+idx <- start_test + h
+actual <- z[idx:n]
+forecasted_acp <- pred_acp[idx:n]
+dates <- index(z)[idx:n]
+
+evaluate(actual, forecasted_acp, dates)
+
+
+```
+
 
