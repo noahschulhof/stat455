@@ -1,0 +1,111 @@
+---
+title: "STAT 455 Project"
+format: html
+editor: source
+execute:
+  echo: true
+  warning: false
+  message: false
+  seed: 17
+---
+
+## Read/inspect data
+
+Source: https://www.eia.gov/dnav/ng/ng_enr_drill_s1_m.htm
+
+```{r}
+library(ggplot2)
+library(forecast)
+library(zoo)
+
+data <- read.csv('data/rigs.csv')
+
+data$date <- as.Date(paste0("01-", data$date), format = "%d-%b-%y")
+
+data %>% 
+  ggplot(aes(date, count)) + 
+  geom_line() + 
+  theme_minimal() + 
+  labs(x = 'Date',
+       y = 'Count',
+       title = 'US Oil Rig Count by Date')
+```
+
+## Convert data to time series
+
+```{r}
+data$date <- as.yearmon(data$date, "%b-%y")
+
+z <- ts(data$count, 
+        start = c(as.numeric(format(data$date[1], "%Y")), 
+                  as.numeric(format(data$date[1], "%m"))),
+        frequency = 12)
+```
+
+
+## Helper function to evaluate a fitted model
+
+```{r}
+evaluate <- function(actual, forecasted, dates){
+  print(accuracy(forecasted, actual))
+  
+  results <- data.frame(date = rep(dates, 2),
+                      value = c(actual, forecasted),
+                      type = c(rep('Actual', length(actual)),
+                               rep('Forecasted', length(forecasted))))
+  
+  results %>% 
+    ggplot(aes(x = date,
+               y = value,
+               color = type)) + 
+    geom_line() + 
+    theme_minimal() + 
+    labs(x = 'Date',
+         y = 'Count',
+         title = 'US Oil Rig Count by Date') +
+    theme(legend.title = element_blank())
+}
+```
+
+## Fit/evaluate ARIMA
+
+```{r}
+# use a 5-year test window
+test_years <- 5
+test_horizon <- test_years * 12
+
+n <- length(z)
+start_test <- n - test_horizon
+h <- 1 # 1-step forecast
+
+pred <- rep(NA, n)
+
+# rolling window forecast
+for (i in start_test:(n - h)) {
+  # train on everything before forecast origin
+  train <- window(z, end = time(z)[i])
+  
+  # fit ARIMA
+  fit <- auto.arima(train)
+  
+  # 1-step ahead forecast
+  pred[i + h] <- forecast(fit, h = h)$mean[h]
+}
+
+# actual/predicted for test window
+idx <- start_test + h
+actual <- z[idx:n]
+forecasted <- pred[idx:n]
+
+dates <- index(z)[idx:n]
+
+evaluate(actual, forecasted, dates)
+```
+
+
+## Fit ACP models
+
+```{r}
+
+```
+
