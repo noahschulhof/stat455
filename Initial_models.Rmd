@@ -42,7 +42,8 @@ data %>%
 
 ```{r}
 data$date <- as.yearmon(data$date, "%b-%y")
-
+# Filtering dataset to work with the most recent 35 years
+data <- tail(data, 420)
 z <- ts(data$count, 
         start = c(as.numeric(format(data$date[1], "%Y")), 
                   as.numeric(format(data$date[1], "%m"))),
@@ -54,6 +55,7 @@ z <- ts(data$count,
 ```{r}
 # Setup
 # use a 5-year test window
+
 test_years <- 5
 test_horizon <- test_years * 12
 
@@ -144,7 +146,8 @@ pred_tsglm <- list()      # store TSGLM forecasts
 arima_models <- list(
   AR1    = c(1,1,0),
   MA1    = c(0,1,1),
-  ARMA11 = c(1,1,1)
+  ARMA11 = c(1,1,1),
+  ARMA30 = c(3,1,0)
 )
 
 for (name in names(arima_models)) {
@@ -184,7 +187,7 @@ for (name in names(arima_models)) {
     data.frame(df_error, panel = "Error")
   )
   
-  # Add a variable for coloring: only color for Forecast vs Actual
+  # Plotting 1 x 2 facetplots of predicted vs. actual and error
   df_combined$color_group <- ifelse(df_combined$panel == "Forecast vs Actual", df_combined$type, "Error")
   
   p <- ggplot(df_combined, aes(x = date, y = value, color = color_group)) +
@@ -205,12 +208,14 @@ for (name in names(arima_models)) {
 }
 
 # TSGLM models
+# scaling counts
 z_scaled <- z / 100
 
 tsglm_models <- list(
-  AR1    = list(past_obs = 1),
-  MA1    = list(past_mean = 1),
-  ARMA11 = list(past_obs = 1, past_mean = 1)
+  AR1    = list(past_mean = NULL, past_obs = 1),
+  MA1    = list(past_mean = 1, past_obs = NULL),
+  ARMA11 = list(past_obs = 1, past_mean = 1),
+  ARMA30 = list(past_obs = 3, past_mean = NULL)
 )
 
 for (name in names(tsglm_models)) {
@@ -219,7 +224,8 @@ for (name in names(tsglm_models)) {
   start <- max(start_test, max_lag + 5)
   
   for (i in start:(n - h)) {
-    train <- z_scaled[1:i]
+    # Currently using a sliding window with size 36 (see comparison in next section)
+    train <- z_scaled[(i-36):i]
     fit <- suppressWarnings(
       tryCatch(
         tsglm(train, model = tsglm_models[[name]], link = "identity", distr = "poisson",
@@ -227,38 +233,47 @@ for (name in names(tsglm_models)) {
         error = function(e) NULL
       )
     )
-    lambda_next <- if (!is.null(fit)) predict(fit, n.ahead = h)$pred[h] else mean(train)
-    pred[i + h] <- lambda_next * 100
+    lambda_next <- predict(fit, n.ahead = h)$pred[h]
+    pred[i + h] <- lambda_next * 100 # scaling back prediction
   }
   
   pred_tsglm[[name]] <- pred
   
-  idx <- start + h
-  actual <- z[idx:n]
-  forecasted <- pred[idx:n]
-  valid <- !is.na(forecasted)
+  # Identify all valid forecast indices globally
+  valid_idx <- which(!is.na(pred))
+  
+  # If no usable points, skip safely
+  if (length(valid_idx) == 0) next
+  
+  # Align actual & forecast based on valid indices
+  aligned_dates <- dates[valid_idx]
+  aligned_actual <- z[valid_idx]
+  aligned_forecast <- pred[valid_idx]
   
   # Metrics
-  metrics <- evaluate_metrics(actual[valid], forecasted[valid])
+  metrics <- evaluate_metrics(aligned_actual, aligned_forecast)
   metrics <- cbind(Model = paste0("TSGLM_", name), metrics)
   results_list[[paste0("TSGLM_", name)]] <- metrics
-  
-  # Forecast and error plots
+
+  # Forecast vs Actual panel
   df_plot <- data.frame(
-    date = rep(dates[idx:n][valid], 2),
-    value = c(actual[valid], forecasted[valid]),
-    type = rep(c("Actual", "Forecasted"), each = sum(valid))
+    date = rep(aligned_dates, 2),
+    value = c(aligned_actual, aligned_forecast),
+    type = rep(c("Actual", "Forecasted"), each = length(aligned_dates))
   )
+  
+  # Error panel
   df_error <- data.frame(
-    date = dates[idx:n][valid],
-    value = actual[valid] - forecasted[valid],
+    date = aligned_dates,
+    value = aligned_actual - aligned_forecast,
     type = "Error"
   )
+  
   df_combined <- rbind(
     data.frame(df_plot, panel = "Forecast vs Actual"),
     data.frame(df_error, panel = "Error")
   )
-  
+
   p <- ggplot(df_combined, aes(x = date, y = value, color = type)) +
     geom_line() +
     facet_wrap(~panel, nrow = 1, scales = "free_y") +
@@ -278,7 +293,13 @@ rownames(comparison_table) <- NULL
 
 comparison_table
 
-# Absolute Error Comparison
+```
+
+### Plotting absolute error for p = 1, q = 1 models 
+
+```{r, fig.width=12, fig.height=4}
+
+# Absolute error comparison for p = 1, q = 1 models
 abs_error_list <- list()
 
 # Comparing p = 1, q = 1 models
@@ -311,4 +332,64 @@ ggplot(df_abs_long, aes(x = date, y = abs_error, color = model)) +
 
 ```
 
+
+
+
+## Comparing different window sizes for ACP models
+```{r}
+window_sizes <- list(
+  w24 = 24,
+  w36 = 36,
+  w48 = 48,
+  w60 = 60,
+  w120 = 120,
+  full = NA
+)
+
+z_scaled <- z / 100
+results_all <- list()
+
+for (wname in names(window_sizes)) {
+  w <- window_sizes[[wname]]
+  tsglm_models <- list(
+    AR1    = list(past_mean = NULL, past_obs = 1),
+    ARMA11 = list(past_obs = 1, past_mean = 1)
+  )
+
+  for (name in names(tsglm_models)) {
+    pred <- rep(NA, n)
+    max_lag <- max(unlist(tsglm_models[[name]]))
+    start <- max(start_test, max_lag + 5)
+
+    for (i in start:(n - h)) {
+      if (is.na(w)) {
+        train <- z_scaled[1:i]
+      } else {
+        train <- z_scaled[(i-w):i]
+      }
+      fit <- suppressWarnings(
+        tryCatch(
+          tsglm(train, model = tsglm_models[[name]], link = "identity", distr = "poisson",
+                init.method = "marginal", init.drop = FALSE),
+          error = function(e) NULL
+        )
+      )
+      lambda_next <- predict(fit, n.ahead = h)$pred[h]
+      pred[i + h] <- lambda_next * 100
+    }
+
+    idx <- start + h
+    actual <- z[idx:n]
+    forecasted <- pred[idx:n]
+    valid <- !is.na(forecasted)
+
+    metrics <- evaluate_metrics(actual[valid], forecasted[valid])
+    metrics <- cbind(Window = wname, Model = paste0("TSGLM_", name), metrics)
+    results_all[[paste0(wname, "_", name)]] <- metrics
+  }
+}
+
+comparison_table <- do.call(rbind, results_all)
+comparison_table
+```
 
