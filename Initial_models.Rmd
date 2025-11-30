@@ -225,7 +225,7 @@ for (name in names(tsglm_models)) {
   
   for (i in start:(n - h)) {
     # Currently using a sliding window with size 36 (see comparison in next section)
-    train <- z_scaled[(i-36):i]
+    train <- z_scaled[(i-36+1):i]
     fit <- suppressWarnings(
       tryCatch(
         tsglm(train, model = tsglm_models[[name]], link = "identity", distr = "poisson",
@@ -365,7 +365,7 @@ for (wname in names(window_sizes)) {
       if (is.na(w)) {
         train <- z_scaled[1:i]
       } else {
-        train <- z_scaled[(i-w):i]
+        train <- z_scaled[(i-w+1):i]
       }
       fit <- suppressWarnings(
         tryCatch(

@@ -318,7 +318,7 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 <span id="cb10-16"><a href="#cb10-16" aria-hidden="true" tabindex="-1"></a>  </span>
 <span id="cb10-17"><a href="#cb10-17" aria-hidden="true" tabindex="-1"></a>  <span class="cf">for</span> (i <span class="cf">in</span> start<span class="sc">:</span>(n <span class="sc">-</span> h)) {</span>
 <span id="cb10-18"><a href="#cb10-18" aria-hidden="true" tabindex="-1"></a>    <span class="co"># Currently using a sliding window with size 36 (see comparison in next section)</span></span>
-<span id="cb10-19"><a href="#cb10-19" aria-hidden="true" tabindex="-1"></a>    train <span class="ot">&lt;-</span> z_scaled[(i<span class="dv">-36</span>)<span class="sc">:</span>i]</span>
+<span id="cb10-19"><a href="#cb10-19" aria-hidden="true" tabindex="-1"></a>    train <span class="ot">&lt;-</span> z_scaled[(i<span class="dv">-36</span><span class="sc">+</span><span class="dv">1</span>)<span class="sc">:</span>i]</span>
 <span id="cb10-20"><a href="#cb10-20" aria-hidden="true" tabindex="-1"></a>    fit <span class="ot">&lt;-</span> <span class="fu">suppressWarnings</span>(</span>
 <span id="cb10-21"><a href="#cb10-21" aria-hidden="true" tabindex="-1"></a>      <span class="fu">tryCatch</span>(</span>
 <span id="cb10-22"><a href="#cb10-22" aria-hidden="true" tabindex="-1"></a>        <span class="fu">tsglm</span>(train, <span class="at">model =</span> tsglm_models[[name]], <span class="at">link =</span> <span class="st">"identity"</span>, <span class="at">distr =</span> <span class="st">"poisson"</span>,</span>
@@ -402,10 +402,10 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 2          MA1   2.5488993  11.889539   8.853280   0.6155792  1.599961
 3       ARMA11   0.9567382   9.547687   7.490575   0.2563958  1.300471
 4       ARMA30   1.0336211   9.665824   7.466233   0.2689827  1.292791
-5    TSGLM_AR1   1.0906342  13.645943  10.887292   0.1786583  1.850389
-6    TSGLM_MA1 -40.4431818 187.461721 145.323077 -13.9887947 28.196272
-7 TSGLM_ARMA11  -0.6972976  14.549063  11.382023  -0.3874320  2.043691
-8 TSGLM_ARMA30   6.9795724  40.602022  31.510379   0.8186951  4.996821</code></pre>
+5    TSGLM_AR1   1.8799324  13.886732  10.758478   0.2979411  1.811943
+6    TSGLM_MA1 -38.0388212 187.386515 145.738533 -13.5708969 28.127432
+7 TSGLM_ARMA11   0.3440811  13.910964  11.102682  -0.1976780  1.960771
+8 TSGLM_ARMA30   6.9967239  40.702193  31.342147   0.7267883  4.918475</code></pre>
 </div>
 </div>
 <section id="plotting-absolute-error-for-p-1-q-1-models" class="level3">
@@ -478,7 +478,7 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 <span id="cb14-26"><a href="#cb14-26" aria-hidden="true" tabindex="-1"></a>      <span class="cf">if</span> (<span class="fu">is.na</span>(w)) {</span>
 <span id="cb14-27"><a href="#cb14-27" aria-hidden="true" tabindex="-1"></a>        train <span class="ot">&lt;-</span> z_scaled[<span class="dv">1</span><span class="sc">:</span>i]</span>
 <span id="cb14-28"><a href="#cb14-28" aria-hidden="true" tabindex="-1"></a>      } <span class="cf">else</span> {</span>
-<span id="cb14-29"><a href="#cb14-29" aria-hidden="true" tabindex="-1"></a>        train <span class="ot">&lt;-</span> z_scaled[(i<span class="sc">-</span>w)<span class="sc">:</span>i]</span>
+<span id="cb14-29"><a href="#cb14-29" aria-hidden="true" tabindex="-1"></a>        train <span class="ot">&lt;-</span> z_scaled[(i<span class="sc">-</span>w<span class="sc">+</span><span class="dv">1</span>)<span class="sc">:</span>i]</span>
 <span id="cb14-30"><a href="#cb14-30" aria-hidden="true" tabindex="-1"></a>      }</span>
 <span id="cb14-31"><a href="#cb14-31" aria-hidden="true" tabindex="-1"></a>      fit <span class="ot">&lt;-</span> <span class="fu">suppressWarnings</span>(</span>
 <span id="cb14-32"><a href="#cb14-32" aria-hidden="true" tabindex="-1"></a>        <span class="fu">tryCatch</span>(</span>
@@ -506,29 +506,29 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 <span id="cb14-54"><a href="#cb14-54" aria-hidden="true" tabindex="-1"></a>comparison_table</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 <div class="cell-output cell-output-stdout">
 <pre><code>            Window        Model          ME     RMSE      MAE         MPE
-w24_AR1        w24    TSGLM_AR1   5.2337131 26.98603 18.25627  0.62832553
-w24_ARMA11     w24 TSGLM_ARMA11   4.6335964 41.14094 31.34438  0.32542468
-w36_AR1        w36    TSGLM_AR1   1.0906342 13.64594 10.88729  0.17865833
-w36_ARMA11     w36 TSGLM_ARMA11  -0.6972976 14.54906 11.38202 -0.38743197
-w48_AR1        w48    TSGLM_AR1   1.4544740 14.17346 11.12930  0.22644892
-w48_ARMA11     w48 TSGLM_ARMA11   0.8382592 14.15683 11.21090  0.08998913
-w60_AR1        w60    TSGLM_AR1   2.8471411 15.93775 12.96584  0.73577485
-w60_ARMA11     w60 TSGLM_ARMA11   0.6520089 16.51425 13.44868  0.30442506
-w120_AR1      w120    TSGLM_AR1 -21.7482868 34.01638 26.78179 -3.46287319
-w120_ARMA11   w120 TSGLM_ARMA11  -9.7917371 19.21288 15.64732 -1.52387659
+w24_AR1        w24    TSGLM_AR1   5.6363597 27.82513 18.01999  0.75020264
+w24_ARMA11     w24 TSGLM_ARMA11   2.5535405 39.43956 29.82223 -0.15319393
+w36_AR1        w36    TSGLM_AR1   1.8799324 13.88673 10.75848  0.29794108
+w36_ARMA11     w36 TSGLM_ARMA11   0.3440811 13.91096 11.10268 -0.19767798
+w48_AR1        w48    TSGLM_AR1   2.4107489 14.40548 11.07742  0.47711629
+w48_ARMA11     w48 TSGLM_ARMA11   1.8328667 13.65900 10.26439  0.39225567
+w60_AR1        w60    TSGLM_AR1   2.6775947 15.68931 12.73972  0.71121068
+w60_ARMA11     w60 TSGLM_ARMA11  -0.7572218 15.93832 12.42873  0.00715601
+w120_AR1      w120    TSGLM_AR1 -21.3626100 34.57871 26.10844 -3.36317580
+w120_ARMA11   w120 TSGLM_ARMA11 -10.1538277 19.53977 16.36508 -1.58333800
 full_AR1      full    TSGLM_AR1  -3.9012078 18.07229 15.40272 -0.47648544
 full_ARMA11   full TSGLM_ARMA11  -2.3165747 16.72534 14.05752 -0.15782586
                 MAPE
-w24_AR1     2.954022
-w24_ARMA11  4.882696
-w36_AR1     1.850389
-w36_ARMA11  2.043691
-w48_AR1     1.982734
-w48_ARMA11  1.913661
-w60_AR1     2.324424
-w60_ARMA11  2.341568
-w120_AR1    4.452567
-w120_ARMA11 2.634464
+w24_AR1     2.954250
+w24_ARMA11  4.784099
+w36_AR1     1.811943
+w36_ARMA11  1.960771
+w48_AR1     1.964440
+w48_ARMA11  1.760256
+w60_AR1     2.289143
+w60_ARMA11  2.110113
+w120_AR1    4.328129
+w120_ARMA11 2.808547
 full_AR1    2.702940
 full_ARMA11 2.429067</code></pre>
 </div>
