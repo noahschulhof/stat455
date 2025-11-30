@@ -1,0 +1,237 @@
+---
+title: "STAT 455 Project"
+format: html
+editor: source
+execute:
+  echo: true
+  warning: false
+  message: false
+  seed: 17
+---
+
+
+## Read/inspect data
+
+Source: https://www.eia.gov/dnav/ng/ng_enr_drill_s1_m.htm
+
+```{r}
+library(ggplot2)
+library(forecast)
+library(zoo)
+library(acp)
+library(tscount)
+library(ggplot2)
+library(dplyr)
+
+
+data <- read.csv('rigs.csv')
+
+data$date <- as.Date(paste0("01-", data$date), format = "%d-%b-%y")
+
+data %>% 
+  ggplot(aes(date, count)) + 
+  geom_line() + 
+  theme_minimal() + 
+  labs(x = 'Date',
+       y = 'Count',
+       title = 'US Oil Rig Count by Date')
+```
+
+
+## Convert data to time series
+
+```{r}
+data$date <- as.yearmon(data$date, "%b-%y")
+
+z <- ts(data$count, 
+        start = c(as.numeric(format(data$date[1], "%Y")), 
+                  as.numeric(format(data$date[1], "%m"))),
+        frequency = 12)
+```
+
+
+## Setup
+```{r}
+# Setup
+# use a 5-year test window
+test_years <- 5
+test_horizon <- test_years * 12
+
+n <- length(z)
+start_test <- n - test_horizon
+h <- 1 # 1-step forecast
+dates <- index(z)
+```
+
+
+
+# ACF and PACF Plots
+
+```{r}
+acf(as.numeric(z)[1:start_test], main = "ACF")
+pacf(as.numeric(z)[1:start_test], main = "PACF")
+```
+
+
+## Running models and evaluating
+
+```{r}
+# Function to return metrics
+evaluate_metrics <- function(actual, forecasted) {
+  acc <- accuracy(forecasted, actual)
+  data.frame(
+    ME   = acc["Test set", "ME"],
+    RMSE = acc["Test set", "RMSE"],
+    MAE  = acc["Test set", "MAE"],
+    MPE  = acc["Test set", "MPE"],
+    MAPE = acc["Test set", "MAPE"]
+  )
+}
+```
+
+```{r}
+# Function to plot forecast vs actual
+evaluate_plot <- function(actual, forecasted, dates, title = "Forecast vs Actual") {
+  df <- data.frame(
+    date = rep(dates, 2),
+    value = c(actual, forecasted),
+    type = rep(c("Actual", "Forecasted"), each = length(actual))
+  )
+  
+  ggplot(df, aes(x = date, y = value, color = type)) +
+    geom_line() +
+    theme_minimal() +
+    labs(
+      x = "Date",
+      y = "Count",
+      title = title
+    ) +
+    theme(legend.title = element_blank())
+}
+```
+
+
+```{r}
+# Function to plot errors
+error_plot <- function(actual, forecasted, dates, title = "Forecast Error") {
+  df <- data.frame(
+    date = dates,
+    error = actual - forecasted
+  )
+  
+  ggplot(df, aes(x = date, y = error)) +
+    geom_line(color = "red") +
+    geom_hline(yintercept = 0, linetype = "dashed") +
+    theme_minimal() +
+    labs(
+      x = "Date",
+      y = "Error (Actual - Forecast)",
+      title = title
+    )
+}
+```
+
+
+
+```{r}
+results_list <- list()    # store metrics
+forecast_plots <- list()  # store forecast vs actual plots
+error_plots <- list()     # store error plots
+
+# ARIMA models 
+arima_models <- list(
+  AR1    = c(1,1,0),
+  MA1    = c(0,1,1),
+  ARMA11 = c(1,1,1)
+)
+
+for (name in names(arima_models)) {
+  pred <- rep(NA, n)
+  
+  for (i in start_test:(n - h)) {
+    train <- window(z, end = time(z)[i])
+    fit <- tryCatch(Arima(train, order = arima_models[[name]]), error = function(e) NULL)
+    if (!is.null(fit)) pred[i + h] <- forecast(fit, h = h)$mean[h]
+  }
+  
+  idx <- start_test + h
+  actual <- z[idx:n]
+  forecasted <- pred[idx:n]
+  valid <- !is.na(forecasted)
+  
+  # Metrics
+  metrics <- evaluate_metrics(actual[valid], forecasted[valid])
+  metrics <- cbind(Model = name, metrics)
+  results_list[[name]] <- metrics
+  
+  # Forecast vs actual plot 
+  p_forecast <- evaluate_plot(actual[valid], forecasted[valid], dates[idx:n][valid],
+                              title = paste("ARIMA -", name, "Forecast"))
+  print(p_forecast)
+  forecast_plots[[name]] <- p_forecast
+  
+  # Error plot
+  p_error <- error_plot(actual[valid], forecasted[valid], dates[idx:n][valid],
+                        title = paste("ARIMA -", name, "Forecast Error"))
+  print(p_error)
+  error_plots[[name]] <- p_error
+}
+
+# TSGLM models
+z_scaled <- z / 100
+
+tsglm_models <- list(
+  AR1    = list(past_obs = 1),
+  MA1    = list(past_mean = 1),
+  ARMA11 = list(past_obs = 1, past_mean = 1)
+)
+
+for (name in names(tsglm_models)) {
+  pred <- rep(NA, n)
+  max_lag <- max(unlist(tsglm_models[[name]]))
+  start <- max(start_test, max_lag + 5)
+  
+  for (i in start:(n - h)) {
+    train <- z_scaled[1:i]
+    fit <- suppressWarnings(
+      tryCatch(
+        tsglm(train, model = tsglm_models[[name]], link = "identity", distr = "poisson",
+               init.method = "marginal", init.drop = FALSE),
+        error = function(e) NULL
+      )
+    )
+    lambda_next <- if (!is.null(fit)) predict(fit, n.ahead = h)$pred[h] else mean(train)
+    pred[i + h] <- lambda_next * 100
+  }
+  
+  idx <- start + h
+  actual <- z[idx:n]
+  forecasted <- pred[idx:n]
+  valid <- !is.na(forecasted)
+  
+  # Metrics
+  metrics <- evaluate_metrics(actual[valid], forecasted[valid])
+  metrics <- cbind(Model = paste0("TSGLM_", name), metrics)
+  results_list[[paste0("TSGLM_", name)]] <- metrics
+  
+  # Forecast vs actual plot
+  p_forecast <- evaluate_plot(actual[valid], forecasted[valid], dates[idx:n][valid],
+                              title = paste("TSGLM -", name, "Forecast"))
+  print(p_forecast)
+  forecast_plots[[paste0("TSGLM_", name)]] <- p_forecast
+  
+  # Error plot
+  p_error <- error_plot(actual[valid], forecasted[valid], dates[idx:n][valid],
+                        title = paste("TSGLM -", name, "Forecast Error"))
+  print(p_error)
+  error_plots[[paste0("TSGLM_", name)]] <- p_error
+}
+
+# Combine results
+comparison_table <- do.call(rbind, results_list)
+rownames(comparison_table) <- NULL
+
+comparison_table
+
+```
+
