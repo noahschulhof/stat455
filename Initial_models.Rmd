@@ -132,11 +132,13 @@ error_plot <- function(actual, forecasted, dates, title = "Forecast Error") {
 ```
 
 
-
-```{r}
+```{r, fig.width=12, fig.height=4}
 results_list <- list()    # store metrics
 forecast_plots <- list()  # store forecast vs actual plots
 error_plots <- list()     # store error plots
+
+pred_arima <- list()      # store ARIMA forecasts
+pred_tsglm <- list()      # store TSGLM forecasts
 
 # ARIMA models 
 arima_models <- list(
@@ -154,6 +156,8 @@ for (name in names(arima_models)) {
     if (!is.null(fit)) pred[i + h] <- forecast(fit, h = h)$mean[h]
   }
   
+  pred_arima[[name]] <- pred
+  
   idx <- start_test + h
   actual <- z[idx:n]
   forecasted <- pred[idx:n]
@@ -164,17 +168,40 @@ for (name in names(arima_models)) {
   metrics <- cbind(Model = name, metrics)
   results_list[[name]] <- metrics
   
-  # Forecast vs actual plot 
-  p_forecast <- evaluate_plot(actual[valid], forecasted[valid], dates[idx:n][valid],
-                              title = paste("ARIMA -", name, "Forecast"))
-  print(p_forecast)
-  forecast_plots[[name]] <- p_forecast
+  # Forecast and error plots
+  df_plot <- data.frame(
+    date = rep(dates[idx:n][valid], 2),
+    value = c(actual[valid], forecasted[valid]),
+    type = rep(c("Actual", "Forecasted"), each = sum(valid))
+  )
+  df_error <- data.frame(
+    date = dates[idx:n][valid],
+    value = actual[valid] - forecasted[valid],
+    type = "Error"
+  )
+  df_combined <- rbind(
+    data.frame(df_plot, panel = "Forecast vs Actual"),
+    data.frame(df_error, panel = "Error")
+  )
   
-  # Error plot
-  p_error <- error_plot(actual[valid], forecasted[valid], dates[idx:n][valid],
-                        title = paste("ARIMA -", name, "Forecast Error"))
-  print(p_error)
-  error_plots[[name]] <- p_error
+  # Add a variable for coloring: only color for Forecast vs Actual
+  df_combined$color_group <- ifelse(df_combined$panel == "Forecast vs Actual", df_combined$type, "Error")
+  
+  p <- ggplot(df_combined, aes(x = date, y = value, color = color_group)) +
+    geom_line() +
+    facet_wrap(~panel, nrow = 1, scales = "free_y") +
+    scale_color_manual(values = c("Actual" = "blue", "Forecasted" = "red", "Error" = "black")) +
+    theme_minimal() +
+    labs(title = paste("ARIMA -", name)) +
+    theme(
+      legend.title = element_blank(),
+      plot.margin = margin(10, 10, 10, 10)
+    )
+  
+  print(p)
+
+  forecast_plots[[name]] <- p
+  error_plots[[name]] <- p
 }
 
 # TSGLM models
@@ -204,6 +231,8 @@ for (name in names(tsglm_models)) {
     pred[i + h] <- lambda_next * 100
   }
   
+  pred_tsglm[[name]] <- pred
+  
   idx <- start + h
   actual <- z[idx:n]
   forecasted <- pred[idx:n]
@@ -214,17 +243,33 @@ for (name in names(tsglm_models)) {
   metrics <- cbind(Model = paste0("TSGLM_", name), metrics)
   results_list[[paste0("TSGLM_", name)]] <- metrics
   
-  # Forecast vs actual plot
-  p_forecast <- evaluate_plot(actual[valid], forecasted[valid], dates[idx:n][valid],
-                              title = paste("TSGLM -", name, "Forecast"))
-  print(p_forecast)
-  forecast_plots[[paste0("TSGLM_", name)]] <- p_forecast
+  # Forecast and error plots
+  df_plot <- data.frame(
+    date = rep(dates[idx:n][valid], 2),
+    value = c(actual[valid], forecasted[valid]),
+    type = rep(c("Actual", "Forecasted"), each = sum(valid))
+  )
+  df_error <- data.frame(
+    date = dates[idx:n][valid],
+    value = actual[valid] - forecasted[valid],
+    type = "Error"
+  )
+  df_combined <- rbind(
+    data.frame(df_plot, panel = "Forecast vs Actual"),
+    data.frame(df_error, panel = "Error")
+  )
   
-  # Error plot
-  p_error <- error_plot(actual[valid], forecasted[valid], dates[idx:n][valid],
-                        title = paste("TSGLM -", name, "Forecast Error"))
-  print(p_error)
-  error_plots[[paste0("TSGLM_", name)]] <- p_error
+  p <- ggplot(df_combined, aes(x = date, y = value, color = type)) +
+    geom_line() +
+    facet_wrap(~panel, nrow = 1, scales = "free_y") +
+    scale_color_manual(values = c("Actual" = "blue", "Forecasted" = "red", "Error" = "black")) +
+    theme_minimal() +
+    labs(title = paste("TSGLM -", name)) +
+    theme(legend.title = element_blank())
+  
+  print(p)
+  forecast_plots[[paste0("TSGLM_", name)]] <- p
+  error_plots[[paste0("TSGLM_", name)]] <- p
 }
 
 # Combine results
@@ -233,5 +278,37 @@ rownames(comparison_table) <- NULL
 
 comparison_table
 
+# Absolute Error Comparison
+abs_error_list <- list()
+
+# Comparing p = 1, q = 1 models
+arima_forecast <- pred_arima[["ARMA11"]][(start_test + h):n]
+tsglm_forecast <- pred_tsglm[["ARMA11"]][(start + h):n]
+actual_vals <- z[(start + h):n]
+
+# Align lengths
+min_len <- min(length(arima_forecast), length(tsglm_forecast), length(actual_vals))
+df_abs <- data.frame(
+  date = dates[(start + h):(start + h + min_len - 1)],
+  ARIMA_abs_error = abs(actual_vals[1:min_len] - arima_forecast[1:min_len]),
+  TSGLM_abs_error = abs(actual_vals[1:min_len] - tsglm_forecast[1:min_len])
+)
+
+df_abs_long <- df_abs %>%
+  tidyr::pivot_longer(cols = c("ARIMA_abs_error", "TSGLM_abs_error"),
+                      names_to = "model",
+                      values_to = "abs_error")
+
+ggplot(df_abs_long, aes(x = date, y = abs_error, color = model)) +
+  geom_line() +
+  theme_minimal() +
+  labs(
+    x = "Date",
+    y = "Absolute Error",
+    title = "Absolute Error: ARIMA vs TSGLM (p = 1, q = 1)"
+  ) +
+  theme(legend.title = element_blank())
+
 ```
+
 
