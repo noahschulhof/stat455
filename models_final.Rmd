@@ -1,0 +1,396 @@
+---
+title: "STAT 455 Project"
+format:
+  html:
+    self-contained: true
+editor: source
+execute:
+  echo: true
+  warning: false
+  message: false
+  seed: 17
+---
+
+
+## Read/inspect data
+
+Source: https://www.eia.gov/dnav/ng/ng_enr_drill_s1_m.htm
+
+```{r}
+library(ggplot2)
+library(forecast)
+library(zoo)
+library(acp)
+library(tscount)
+library(ggplot2)
+library(dplyr)
+
+
+data <- read.csv('data/rigs.csv')
+
+data$date <- as.Date(paste0("01-", data$date), format = "%d-%b-%y")
+
+data %>% 
+  ggplot(aes(date, count)) + 
+  geom_line() + 
+  theme_minimal() + 
+  labs(x = 'Date',
+       y = 'Count',
+       title = 'US Oil Rig Count by Date')
+```
+
+
+## Convert data to time series
+
+```{r}
+data$date <- as.yearmon(data$date, "%b-%y")
+
+z <- ts(data$count, 
+        start = c(as.numeric(format(data$date[1], "%Y")), 
+                  as.numeric(format(data$date[1], "%m"))),
+        frequency = 12)
+```
+
+
+## Setup
+```{r}
+# Setup
+# use a 5-year test window
+
+test_years <- 5
+test_horizon <- test_years * 12
+
+n <- length(z)
+start_test <- n - test_horizon
+h <- 1 # 1-step forecast
+dates <- index(z)
+```
+
+
+
+# ACF and PACF Plots
+
+```{r}
+acf(as.numeric(z)[1:start_test], main = "ACF")
+pacf(as.numeric(z)[1:start_test], main = "PACF")
+```
+
+
+## Running models and evaluating
+
+```{r}
+# Function to return metrics
+evaluate_metrics <- function(actual, forecasted) {
+  acc <- accuracy(forecasted, actual)
+  data.frame(
+    ME   = acc["Test set", "ME"],
+    RMSE = acc["Test set", "RMSE"],
+    MAE  = acc["Test set", "MAE"],
+    MPE  = acc["Test set", "MPE"],
+    MAPE = acc["Test set", "MAPE"]
+  )
+}
+```
+
+```{r}
+# Function to plot forecast vs actual
+evaluate_plot <- function(actual, forecasted, dates, title = "Forecast vs Actual") {
+  df <- data.frame(
+    date = rep(dates, 2),
+    value = c(actual, forecasted),
+    type = rep(c("Actual", "Forecasted"), each = length(actual))
+  )
+  
+  ggplot(df, aes(x = date, y = value, color = type)) +
+    geom_line() +
+    theme_minimal() +
+    labs(
+      x = "Date",
+      y = "Count",
+      title = title
+    ) +
+    theme(legend.title = element_blank())
+}
+```
+
+
+```{r}
+# Function to plot errors
+error_plot <- function(actual, forecasted, dates, title = "Forecast Error") {
+  df <- data.frame(
+    date = dates,
+    error = actual - forecasted
+  )
+  
+  ggplot(df, aes(x = date, y = error)) +
+    geom_line(color = "red") +
+    geom_hline(yintercept = 0, linetype = "dashed") +
+    theme_minimal() +
+    labs(
+      x = "Date",
+      y = "Error (Actual - Forecast)",
+      title = title
+    )
+}
+```
+
+
+```{r, fig.width=12, fig.height=4}
+results_list <- list()    # store metrics
+forecast_plots <- list()  # store forecast vs actual plots
+error_plots <- list()     # store error plots
+
+pred_arima <- list()      # store ARIMA forecasts
+pred_tsglm <- list()      # store TSGLM forecasts
+
+# ARIMA models 
+arima_models <- list(
+  AR1    = c(1,1,0),
+  MA1    = c(0,1,1),
+  ARMA11 = c(1,1,1),
+  ARMA30 = c(3,1,0)
+)
+
+for (name in names(arima_models)) {
+  pred <- rep(NA, n)
+  
+  for (i in start_test:(n - h)) {
+    train <- window(z, end = time(z)[i])
+    fit <- tryCatch(Arima(train, order = arima_models[[name]]), error = function(e) NULL)
+    if (!is.null(fit)) pred[i + h] <- forecast(fit, h = h)$mean[h]
+  }
+  
+  pred_arima[[name]] <- pred
+  
+  idx <- start_test + h
+  actual <- z[idx:n]
+  forecasted <- pred[idx:n]
+  valid <- !is.na(forecasted)
+  
+  # Metrics
+  metrics <- evaluate_metrics(actual[valid], forecasted[valid])
+  metrics <- cbind(Model = name, metrics)
+  results_list[[name]] <- metrics
+  
+  # Forecast and error plots
+  df_plot <- data.frame(
+    date = rep(dates[idx:n][valid], 2),
+    value = c(actual[valid], forecasted[valid]),
+    type = rep(c("Actual", "Forecasted"), each = sum(valid))
+  )
+  df_error <- data.frame(
+    date = dates[idx:n][valid],
+    value = actual[valid] - forecasted[valid],
+    type = "Error"
+  )
+  df_combined <- rbind(
+    data.frame(df_plot, panel = "Forecast vs Actual"),
+    data.frame(df_error, panel = "Error")
+  )
+  
+  # Plotting 1 x 2 facetplots of predicted vs. actual and error
+  df_combined$color_group <- ifelse(df_combined$panel == "Forecast vs Actual", df_combined$type, "Error")
+  
+  p <- ggplot(df_combined, aes(x = date, y = value, color = color_group)) +
+    geom_line() +
+    facet_wrap(~panel, nrow = 1, scales = "free_y") +
+    scale_color_manual(values = c("Actual" = "blue", "Forecasted" = "red", "Error" = "black")) +
+    theme_minimal() +
+    labs(title = paste("ARIMA -", name)) +
+    theme(
+      legend.title = element_blank(),
+      plot.margin = margin(10, 10, 10, 10)
+    )
+  
+  print(p)
+
+  forecast_plots[[name]] <- p
+  error_plots[[name]] <- p
+}
+
+# TSGLM models
+# scaling counts
+z_scaled <- z / 100
+
+tsglm_models <- list(
+  AR1    = list(past_mean = NULL, past_obs = 1),
+  MA1    = list(past_mean = 1, past_obs = NULL),
+  ARMA11 = list(past_obs = 1, past_mean = 1),
+  ARMA30 = list(past_obs = 3, past_mean = NULL)
+)
+
+for (name in names(tsglm_models)) {
+  pred <- rep(NA, n)
+  max_lag <- max(unlist(tsglm_models[[name]]))
+  start <- max(start_test, max_lag + 5)
+  
+  for (i in start:(n - h)) {
+    # Currently using a sliding window with size 36 (see comparison in next section)
+    train <- z_scaled[(i-36+1):i]
+    fit <- suppressWarnings(
+      tryCatch(
+        tsglm(train, model = tsglm_models[[name]], link = "identity", distr = "poisson",
+               init.method = "marginal", init.drop = FALSE),
+        error = function(e) NULL
+      )
+    )
+    lambda_next <- predict(fit, n.ahead = h)$pred[h]
+    pred[i + h] <- lambda_next * 100 # scaling back prediction
+  }
+  
+  pred_tsglm[[name]] <- pred
+  
+  # Identify all valid forecast indices globally
+  valid_idx <- which(!is.na(pred))
+  
+  # If no usable points, skip safely
+  if (length(valid_idx) == 0) next
+  
+  # Align actual & forecast based on valid indices
+  aligned_dates <- dates[valid_idx]
+  aligned_actual <- z[valid_idx]
+  aligned_forecast <- pred[valid_idx]
+  
+  # Metrics
+  metrics <- evaluate_metrics(aligned_actual, aligned_forecast)
+  metrics <- cbind(Model = paste0("TSGLM_", name), metrics)
+  results_list[[paste0("TSGLM_", name)]] <- metrics
+
+  # Forecast vs Actual panel
+  df_plot <- data.frame(
+    date = rep(aligned_dates, 2),
+    value = c(aligned_actual, aligned_forecast),
+    type = rep(c("Actual", "Forecasted"), each = length(aligned_dates))
+  )
+  
+  # Error panel
+  df_error <- data.frame(
+    date = aligned_dates,
+    value = aligned_actual - aligned_forecast,
+    type = "Error"
+  )
+  
+  df_combined <- rbind(
+    data.frame(df_plot, panel = "Forecast vs Actual"),
+    data.frame(df_error, panel = "Error")
+  )
+
+  p <- ggplot(df_combined, aes(x = date, y = value, color = type)) +
+    geom_line() +
+    facet_wrap(~panel, nrow = 1, scales = "free_y") +
+    scale_color_manual(values = c("Actual" = "blue", "Forecasted" = "red", "Error" = "black")) +
+    theme_minimal() +
+    labs(title = paste("TSGLM -", name)) +
+    theme(legend.title = element_blank())
+  
+  print(p)
+  forecast_plots[[paste0("TSGLM_", name)]] <- p
+  error_plots[[paste0("TSGLM_", name)]] <- p
+}
+
+# Combine results
+comparison_table <- do.call(rbind, results_list)
+rownames(comparison_table) <- NULL
+
+comparison_table
+
+```
+
+### Plotting absolute error for p = 1, q = 1 models 
+
+```{r, fig.width=12, fig.height=4}
+
+# Absolute error comparison for p = 1, q = 1 models
+abs_error_list <- list()
+
+# Comparing p = 1, q = 1 models
+arima_forecast <- pred_arima[["ARMA11"]][(start_test + h):n]
+tsglm_forecast <- pred_tsglm[["ARMA11"]][(start + h):n]
+actual_vals <- z[(start + h):n]
+
+# Align lengths
+min_len <- min(length(arima_forecast), length(tsglm_forecast), length(actual_vals))
+df_abs <- data.frame(
+  date = dates[(start + h):(start + h + min_len - 1)],
+  ARIMA_abs_error = abs(actual_vals[1:min_len] - arima_forecast[1:min_len]),
+  TSGLM_abs_error = abs(actual_vals[1:min_len] - tsglm_forecast[1:min_len])
+)
+
+df_abs_long <- df_abs %>%
+  tidyr::pivot_longer(cols = c("ARIMA_abs_error", "TSGLM_abs_error"),
+                      names_to = "model",
+                      values_to = "abs_error")
+
+ggplot(df_abs_long, aes(x = date, y = abs_error, color = model)) +
+  geom_line() +
+  theme_minimal() +
+  labs(
+    x = "Date",
+    y = "Absolute Error",
+    title = "Absolute Error: ARIMA vs TSGLM (p = 1, q = 1)"
+  ) +
+  theme(legend.title = element_blank())
+
+```
+
+
+
+
+## Comparing different window sizes for ACP models
+```{r}
+window_sizes <- list(
+  w24 = 24,
+  w36 = 36,
+  w48 = 48,
+  w60 = 60,
+  w120 = 120,
+  full = NA
+)
+
+z_scaled <- z / 100
+results_all <- list()
+
+for (wname in names(window_sizes)) {
+  w <- window_sizes[[wname]]
+  tsglm_models <- list(
+    AR1    = list(past_mean = NULL, past_obs = 1),
+    ARMA11 = list(past_obs = 1, past_mean = 1)
+  )
+
+  for (name in names(tsglm_models)) {
+    pred <- rep(NA, n)
+    max_lag <- max(unlist(tsglm_models[[name]]))
+    start <- max(start_test, max_lag + 5)
+
+    for (i in start:(n - h)) {
+      if (is.na(w)) {
+        train <- z_scaled[1:i]
+      } else {
+        train <- z_scaled[(i-w+1):i]
+      }
+      fit <- suppressWarnings(
+        tryCatch(
+          tsglm(train, model = tsglm_models[[name]], link = "identity", distr = "poisson",
+                init.method = "marginal", init.drop = FALSE),
+          error = function(e) NULL
+        )
+      )
+      lambda_next <- predict(fit, n.ahead = h)$pred[h]
+      pred[i + h] <- lambda_next * 100
+    }
+
+    idx <- start + h
+    actual <- z[idx:n]
+    forecasted <- pred[idx:n]
+    valid <- !is.na(forecasted)
+
+    metrics <- evaluate_metrics(actual[valid], forecasted[valid])
+    metrics <- cbind(Window = wname, Model = paste0("TSGLM_", name), metrics)
+    results_all[[paste0(wname, "_", name)]] <- metrics
+  }
+}
+
+comparison_table <- do.call(rbind, results_all)
+comparison_table
+```
+
