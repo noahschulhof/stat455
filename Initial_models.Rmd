@@ -6,6 +6,7 @@ execute:
   echo: true
   warning: false
   message: false
+  self-contained: true
   seed: 17
 ---
 
@@ -24,7 +25,7 @@ library(ggplot2)
 library(dplyr)
 
 
-data <- read.csv('rigs.csv')
+data <- read.csv('data/rigs.csv')
 
 data$date <- as.Date(paste0("01-", data$date), format = "%d-%b-%y")
 
