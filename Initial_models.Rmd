@@ -1,12 +1,13 @@
 ---
 title: "STAT 455 Project"
-format: html
+format:
+  html:
+    self-contained: true
 editor: source
 execute:
   echo: true
   warning: false
   message: false
-  self-contained: true
   seed: 17
 ---
 
