@@ -347,55 +347,6 @@ window_table <- bind_rows(window_results) %>%
 window_table
 ```
 
-## 8.2 Training Sample Size Sensitivity for ARIMA
-
-```{r sample-size-sensitivity}
-# Create 35-year subset
-z_35y <- tail(z, 35 * 12)
-n_35y <- length(z_35y)
-start_test_35y <- n_35y - test_horizon
-
-size_results <- list()
-
-cat("\nTesting training sample size sensitivity for ARIMA...\n")
-for (name in names(arima_models)) {
-  # Full series
-  pred_full <- rolling_forecast("ARIMA", name, arima_models[[name]])
-  actual_full <- z[(start_test + h):n]
-  forecasted_full <- pred_full[(start_test + h):n]
-  valid_full <- !is.na(forecasted_full)
-  
-  metrics_full <- evaluate_metrics(actual_full[valid_full], forecasted_full[valid_full])
-  metrics_full$Model <- paste0("ARIMA_", name)
-  metrics_full$TrainSize <- "Full"
-  
-  # 35-year series
-  pred_35y <- rep(NA, n_35y)
-  for (i in start_test_35y:(n_35y - h)) {
-    train <- window(z_35y, end = time(z_35y)[i])
-    fit <- tryCatch(Arima(train, order = arima_models[[name]]), error = function(e) NULL)
-    if (!is.null(fit)) pred_35y[i + h] <- forecast(fit, h = h)$mean[h]
-  }
-  
-  actual_35y <- z_35y[(start_test_35y + h):n_35y]
-  forecasted_35y <- pred_35y[(start_test_35y + h):n_35y]
-  valid_35y <- !is.na(forecasted_35y)
-  
-  metrics_35y <- evaluate_metrics(actual_35y[valid_35y], forecasted_35y[valid_35y])
-  metrics_35y$Model <- paste0("ARIMA_", name)
-  metrics_35y$TrainSize <- "35 Years"
-  
-  size_results[[paste0(name, "_full")]] <- metrics_full
-  size_results[[paste0(name, "_35y")]] <- metrics_35y
-}
-
-# Display size sensitivity results
-size_table <- bind_rows(size_results) %>% 
-  select(Model, TrainSize, RMSE, MAE, MAPE) %>% 
-  arrange(Model, TrainSize)
-
-size_table
-```
 
 # 9. Best Model Analysis
 
