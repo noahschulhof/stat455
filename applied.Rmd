@@ -31,13 +31,11 @@ This project compares ARIMA and TSGLM (ACP/INGARCH) models for forecasting month
 ## 2.1 Load Libraries
 
 ```{r libraries}
-library(ggplot2)
+library(tidyverse)
 library(forecast)
 library(zoo)
 library(tscount)
-library(dplyr)
-library(tidyr)
-library(knitr)
+library(kableExtra)
 ```
 
 ## 2.2 Load Data
@@ -132,20 +130,20 @@ evaluate_metrics <- function(actual, forecasted) {
 
 ```{r define-models}
 arima_models <- list(
-  AR1    = c(1, 1, 0),     # ARIMA(1,1,0)
-  MA1    = c(0, 1, 1),     # ARIMA(0,1,1)
-  ARMA11 = c(1, 1, 1),     # ARIMA(1,1,1)
-  AR3 = c(3, 1, 0),      # ARIMA(3,1,0)
-  AR5 = c(5, 1, 0)      # ARIMA(5,1,0)
+  "(1,1,0)"    = c(1, 1, 0),     # ARIMA(1,1,0)
+  "(0,1,1)"    = c(0, 1, 1),     # ARIMA(0,1,1)
+  "(1,1,1)" = c(1, 1, 1),     # ARIMA(1,1,1)
+  "(3,1,0)" = c(3, 1, 0),      # ARIMA(3,1,0)
+  "(5,1,0)" = c(5, 1, 0)      # ARIMA(5,1,0)
 )
 
 # TSGLM model specifications
 tsglm_models <- list(
-  AR1    = list(past_mean = NULL, past_obs = 1),      # ACP(1,0)
-  MA1    = list(past_mean = 1, past_obs = NULL),      # ACP(0,1)
-  ARMA11 = list(past_obs = 1, past_mean = 1),         # ACP(1,1)
-  AR3 = list(past_obs = 3, past_mean = NULL),       # ACP(3,0)
-  AR5 = list(past_obs = 5, past_mean = NULL)       # ACP(5,0)
+  "AR(1)"    = list(past_mean = NULL, past_obs = 1),      # ACP(1,0)
+  "MA(1)"    = list(past_mean = 1, past_obs = NULL),      # ACP(0,1)
+  "ARMA(1,1)" = list(past_obs = 1, past_mean = 1),         # ACP(1,1)
+  "AR(3)" = list(past_obs = 3, past_mean = NULL),       # ACP(3,0)
+  "AR(5)" = list(past_obs = 5, past_mean = NULL)       # ACP(5,0)
   
 )
 
@@ -227,7 +225,7 @@ for (name in names(arima_models)) {
   
   if (sum(valid) > 0) {
     metrics <- evaluate_metrics(actual[valid], forecasted[valid])
-    metrics$Model <- paste0("ARIMA_", name)
+    metrics$Model <- paste0("ARIMA", name)
     metrics$Type <- "ARIMA"
     arima_results[[name]] <- metrics
   }
@@ -256,7 +254,7 @@ for (name in names(tsglm_models)) {
     aligned_forecast <- pred[valid_idx]
     
     metrics <- evaluate_metrics(aligned_actual, aligned_forecast)
-    metrics$Model <- paste0("TSGLM_", name)
+    metrics$Model <- paste0("TSGLM-", name)
     metrics$Type <- "TSGLM"
     tsglm_results[[name]] <- metrics
   }
@@ -276,14 +274,65 @@ all_results <- bind_rows(
   select(Model, Type, RMSE, MAE, MAPE) %>% 
   arrange(RMSE)
 
-all_results
+all_results %>% kable()
+```
+
+
+## 8.2 Visualize Results
+
+```{r}
+for (i in 1:nrow(all_results)){
+  model <- all_results[i, ]
+  
+  if (grepl("ARIMA", model$Model)) {
+    model_type <- "ARIMA"
+    model_name <- gsub("ARIMA", "", model$Model)
+    pred <- arima_predictions[[model_name]]
+  } else {
+    model_type <- "TSGLM"
+    model_name <- gsub("TSGLM-", "", model$Model)
+    pred <- tsglm_predictions[[model_name]]
+  }
+  
+  forecast_df <- data.frame(
+  Date = dates[(start_test + h):n],
+  Actual = z[(start_test + h):n],
+  Forecast = pred[(start_test + h):n]
+  ) %>% 
+    filter(!is.na(Forecast))
+  
+  plot <- ggplot(forecast_df, aes(x = Date)) +
+    geom_line(aes(y = Actual, color = "Actual"), linewidth = 0.8) +
+    geom_line(aes(y = Forecast, color = "Forecast"), linewidth = 0.8, linetype = "dashed") +
+    geom_ribbon(aes(ymin = pmin(Actual, Forecast), 
+                    ymax = pmax(Actual, Forecast)), 
+                alpha = 0.2, fill = "gray") +
+    scale_color_manual(
+      values = c("Actual" = "#2c3e50", "Forecast" = "#e74c3c"),
+      name = ""
+    ) +
+    theme_minimal(base_size = 14) +
+    labs(
+      title = paste("Model Forecast:", model$Model),
+      subtitle = paste("RMSE =", model$RMSE, "| MAPE =", model$MAPE, "%"),
+      x = "Date",
+      y = "Rig Count"
+    ) +
+    theme(
+      plot.title = element_text(face = "bold", hjust = 0.5),
+      plot.subtitle = element_text(hjust = 0.5),
+      legend.position = "bottom"
+    )
+  
+  print(plot)
+}
 ```
 
 
 
-# 8. Sensitivity Analysis
+# 9. Sensitivity Analysis
 
-## 8.1 Window Size Sensitivity for TSGLM
+## 9.1 Window Size Sensitivity for TSGLM
 
 ```{r window-sensitivity}
 window_sizes <- list(
@@ -336,7 +385,7 @@ for (wname in names(window_sizes)) {
     if (length(valid_idx) > 0) {
       metrics <- evaluate_metrics(z[valid_idx], pred[valid_idx])
       metrics$Window <- wname
-      metrics$Model <- paste0("TSGLM_", mname)
+      metrics$Model <- paste0("TSGLM-", mname)
       window_results[[paste0(wname, "_", mname)]] <- metrics
     }
   }
@@ -347,11 +396,11 @@ window_table <- bind_rows(window_results) %>%
   select(Window, Model, RMSE, MAE, MAPE) %>% 
   arrange(Model, RMSE)
 
-window_table
+window_table %>% kable()
 ```
 
 
-## 8.2 Training Sample Size Sensitivity for ARIMA
+## 9.2 Training Sample Size Sensitivity for ARIMA
 
 ```{r sample-size-sensitivity}
 # Create 35-year subset
@@ -370,7 +419,7 @@ for (name in names(arima_models)) {
   valid_full <- !is.na(forecasted_full)
   
   metrics_full <- evaluate_metrics(actual_full[valid_full], forecasted_full[valid_full])
-  metrics_full$Model <- paste0("ARIMA_", name)
+  metrics_full$Model <- paste0("ARIMA-", name)
   metrics_full$TrainSize <- "Full"
   
   # 35-year series
@@ -398,12 +447,12 @@ size_table <- bind_rows(size_results) %>%
   select(Model, TrainSize, RMSE, MAE, MAPE) %>% 
   arrange(Model, TrainSize)
 
-size_table
+size_table %>% kable()
 ```
 
-# 9. Best Model Analysis
+# 10. Best Model 
 
-## 9.1 Identify Best Model
+## 10.1 Identify Best Model
 
 ```{r best-model}
 best_model <- all_results %>% 
@@ -416,17 +465,17 @@ cat("MAE:", best_model$MAE, "\n")
 cat("MAPE:", best_model$MAPE, "%\n")
 ```
 
-## 9.2 Forecast Plot for Best Model
+## 10.2 Forecast Plot for Best Model
 
 ```{r best-model-plot}
 # Determine which model type is best
 if (grepl("ARIMA", best_model$Model)) {
   model_type <- "ARIMA"
-  model_name <- gsub("ARIMA_", "", best_model$Model)
+  model_name <- gsub("ARIMA", "", best_model$Model)
   pred_best <- arima_predictions[[model_name]]
 } else {
   model_type <- "TSGLM"
-  model_name <- gsub("TSGLM_", "", best_model$Model)
+  model_name <- gsub("TSGLM-", "", best_model$Model)
   pred_best <- tsglm_predictions[[model_name]]
 }
 
